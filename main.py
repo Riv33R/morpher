@@ -141,32 +141,54 @@ _SINGULAR_CASE_ORDER: list[str] = ["gent", "datv", "accs", "ablt", "loct"]
 _PLURAL_CASE_ORDER: list[str] = ["nomn", "gent", "datv", "accs", "ablt", "loct"]
 
 
-def _compute_all_forms(word: str) -> AllFormsResponse:
-    """Вычисляет все падежные формы слова (ед. и мн. число)."""
-    parsed = morph.parse(word.strip())
-    if not parsed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Не удалось выполнить морфологический анализ слова: '{word}'.",
-        )
+def _inflect_phrase(phrase: str, grammemes: set[str]) -> str:
+    """
+    Склоняет каждое слово в фразе в заданный падеж (и/или число).
+    Токены, которые нельзя просклонять (числа, несклоняемые слова), оставляются без изменений.
+    Сохраняет регистр первой буквы исходного токена (заглавная буква).
+    """
+    result_tokens: list[str] = []
+    for token in phrase.split():
+        parsed = morph.parse(token)
+        if not parsed:
+            # Не удалось проанализировать — оставляем как есть
+            result_tokens.append(token)
+            continue
 
-    best = parsed[0]  # первый (наиболее вероятный) разбор
+        best = parsed[0]
+        inflected = best.inflect(grammemes)
 
-    def _inflect(grammemes: set[str]) -> str | None:
-        result = best.inflect(grammemes)
-        return result.word if result is not None else None
+        if inflected is None:
+            # Несклоняемое слово — оставляем без изменений
+            result_tokens.append(token)
+        else:
+            word = inflected.word
+            # Сохраняем заглавный регистр, если он был в исходном токене
+            if token[0].isupper():
+                word = word[0].upper() + word[1:]
+            result_tokens.append(word)
 
-    # Единственное число: все падежи кроме Именительного (он — исходное слово)
+    return " ".join(result_tokens)
+
+
+def _compute_all_forms(phrase: str) -> AllFormsResponse:
+    """Вычисляет все падежные формы фразы (ед. и мн. число)."""
+    # Проверяем, что вход не пустой
+    phrase = phrase.strip()
+    if not phrase:
+        raise HTTPException(status_code=400, detail="Передана пустая строка.")
+
+    # Единственное число: все падежи кроме Именительного (он — исходная фраза)
     singular: dict[str, str | None] = {
-        case: _inflect({case}) for case in _SINGULAR_CASE_ORDER
+        case: _inflect_phrase(phrase, {case}) for case in _SINGULAR_CASE_ORDER
     }
 
     # Множественное число: все шесть падежей
     plural: dict[str, str | None] = {
-        case: _inflect({"plur", case}) for case in _PLURAL_CASE_ORDER
+        case: _inflect_phrase(phrase, {"plur", case}) for case in _PLURAL_CASE_ORDER
     }
 
-    return AllFormsResponse(original=word.strip(), singular=singular, plural=plural)
+    return AllFormsResponse(original=phrase, singular=singular, plural=plural)
 
 
 def _build_xml(data: AllFormsResponse) -> bytes:
@@ -264,10 +286,11 @@ async def inflect_all(
 )
 async def inflect_word(request: InflectRequest) -> InflectResponse:
     """
-    Принимает слово и тег падежа, возвращает просклонённую форму.
+    Принимает фразу (одно или несколько слов) и тег падежа, возвращает просклонённую форму.
 
+    - Каждое слово в фразе склоняется независимо.
     - Используется **первый (наиболее вероятный)** вариант морфологического разбора.
-    - Если слово не удаётся просклонять, возвращается HTTP 400.
+    - Несклоняемые слова остаются без изменений.
     """
     # Нормализуем тег падежа к нижнему регистру
     case_tag = request.case.strip().lower()
@@ -282,31 +305,12 @@ async def inflect_word(request: InflectRequest) -> InflectResponse:
             ),
         )
 
-    # Морфологический анализ слова (берём первый, наиболее вероятный разбор)
-    parsed = morph.parse(request.word.strip())
-    if not parsed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Не удалось выполнить морфологический анализ слова: '{request.word}'.",
-        )
-
-    best_parse = parsed[0]
-
-    # Попытка склонения в нужный падеж
-    inflected = best_parse.inflect({case_tag})
-    if inflected is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Не удалось просклонять слово '{request.word}' "
-                f"в падеж '{case_tag}'. "
-                "Возможно, слово является несклоняемым."
-            ),
-        )
+    # Склоняем каждое слово фразы независимо
+    inflected_phrase = _inflect_phrase(request.word.strip(), {case_tag})
 
     return InflectResponse(
         original=request.word,
-        inflected=inflected.word,
+        inflected=inflected_phrase,
         case=case_tag,
         case_description=CASE_DESCRIPTIONS[case_tag],
     )
