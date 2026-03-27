@@ -4,7 +4,7 @@
 """
 
 import pymorphy3
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 # --- Инициализация анализатора ---
@@ -60,6 +60,22 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Статус сервиса.", examples=["ok"])
 
 
+class AllFormsResponse(BaseModel):
+    """Полная таблица склонений слова (ед. и мн. число)."""
+
+    original: str = Field(..., description="Исходное слово (Именительный, ед.ч.).")
+    singular: dict[str, str | None] = Field(
+        ...,
+        description="Формы единственного числа. Ключ — тег падежа pymorphy3.",
+        examples=[{"gent": "стола", "datv": "столу", "accs": "стол", "ablt": "столом", "loct": "столе"}],
+    )
+    plural: dict[str, str | None] = Field(
+        ...,
+        description="Формы множественного числа. Ключ — тег падежа pymorphy3.",
+        examples=[{"nomn": "столы", "gent": "столов", "datv": "столам", "accs": "столы", "ablt": "столами", "loct": "столах"}],
+    )
+
+
 # --- Инициализация приложения ---
 
 app = FastAPI(
@@ -79,11 +95,84 @@ app = FastAPI(
         "| `ablt` | Творительный (кем? чем?) |\n"
         "| `loct` | Предложный (о ком? о чём?) |\n"
     ),
-    version="1.0.0",
+    version="1.1.0",
     contact={
         "name": "Morpher API",
     },
 )
+
+
+# --- Вспомогательные функции ---
+
+# Соответствие тегов pymorphy3 → русскоязычным XML-тегам (как у morpher.me)
+_CASE_TO_XML_TAG: dict[str, str] = {
+    "nomn": "И",
+    "gent": "Р",
+    "datv": "Д",
+    "accs": "В",
+    "ablt": "Т",
+    "loct": "П",
+}
+
+# Порядок падежей в XML: единственное число (без Именительного — он является входным словом)
+_SINGULAR_CASE_ORDER: list[str] = ["gent", "datv", "accs", "ablt", "loct"]
+# Множественное число — все шесть падежей
+_PLURAL_CASE_ORDER: list[str] = ["nomn", "gent", "datv", "accs", "ablt", "loct"]
+
+
+def _compute_all_forms(word: str) -> AllFormsResponse:
+    """Вычисляет все падежные формы слова (ед. и мн. число)."""
+    parsed = morph.parse(word.strip())
+    if not parsed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не удалось выполнить морфологический анализ слова: '{word}'.",
+        )
+
+    best = parsed[0]  # первый (наиболее вероятный) разбор
+
+    def _inflect(grammemes: set[str]) -> str | None:
+        result = best.inflect(grammemes)
+        return result.word if result is not None else None
+
+    # Единственное число: все падежи кроме Именительного (он — исходное слово)
+    singular: dict[str, str | None] = {
+        case: _inflect({case}) for case in _SINGULAR_CASE_ORDER
+    }
+
+    # Множественное число: все шесть падежей
+    plural: dict[str, str | None] = {
+        case: _inflect({"plur", case}) for case in _PLURAL_CASE_ORDER
+    }
+
+    return AllFormsResponse(original=word.strip(), singular=singular, plural=plural)
+
+
+def _build_xml(data: AllFormsResponse) -> str:
+    """Строит XML-строку в формате, совместимом с morpher.me."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("xml")
+    root.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+    root.set("xmlns:xsd", "http://www.w3.org/2001/XMLSchema")
+
+    # Именительный ед.ч. — исходное слово (первый тег в выдаче morpher.me)
+    ET.SubElement(root, "И").text = data.original
+
+    # Остальные падежи единственного числа
+    for case in _SINGULAR_CASE_ORDER:
+        value = data.singular.get(case)
+        if value is not None:
+            ET.SubElement(root, _CASE_TO_XML_TAG[case]).text = value
+
+    # Множественное число — вложенный блок <множественное>
+    plural_elem = ET.SubElement(root, "множественное")
+    for case in _PLURAL_CASE_ORDER:
+        value = data.plural.get(case)
+        if value is not None:
+            ET.SubElement(plural_elem, _CASE_TO_XML_TAG[case]).text = value
+
+    return ET.tostring(root, encoding="unicode")
 
 
 # --- Эндпоинты ---
@@ -99,10 +188,53 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+@app.get(
+    "/api/v1/inflect",
+    summary="Полное склонение слова (все падежи, JSON или XML)",
+    tags=["Morphology"],
+    responses={
+        200: {
+            "content": {
+                "application/json": {},
+                "application/xml": {"example": "<xml>...</xml>"},
+            }
+        },
+        400: {"description": "Невозможно просклонять слово."},
+    },
+)
+async def inflect_all(
+    word: str = Query(..., description="Слово на русском языке для полного склонения."),
+    format: str = Query("json", description="Формат ответа: json или xml."),
+) -> object:
+    """
+    Возвращает **все падежные формы** слова (единственное и множественное число).
+
+    - **word** — слово на русском языке.
+    - **format** — формат ответа: `json` (по умолчанию) или `xml`.
+
+    XML-формат совместим с morpher.me и содержит кириллические теги падежей:  
+    `<И>` `<Р>` `<Д>` `<В>` `<Т>` `<П>` и блок `<множественное>`.
+    """
+    fmt = format.strip().lower()
+    if fmt not in {"json", "xml"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Параметр 'format' должен быть 'json' или 'xml'.",
+        )
+
+    data = _compute_all_forms(word)
+
+    if fmt == "xml":
+        xml_body = _build_xml(data)
+        return Response(content=xml_body, media_type="application/xml")
+
+    return data
+
+
 @app.post(
     "/api/v1/inflect",
     response_model=InflectResponse,
-    summary="Склонение слова по падежу",
+    summary="Склонение слова по одному падежу",
     tags=["Morphology"],
     responses={
         400: {"description": "Невозможно просклонять слово или неверный тег падежа."}

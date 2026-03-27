@@ -66,7 +66,61 @@ curl http://localhost:8000/health
 {"status": "ok"}
 ```
 
-### Склонение слова
+### Полное склонение слова (JSON)
+
+```bash
+curl "http://localhost:8000/api/v1/inflect?word=привет&format=json"
+```
+
+```json
+{
+  "original": "привет",
+  "singular": {
+    "gent": "привета",
+    "datv": "привету",
+    "accs": "привет",
+    "ablt": "приветом",
+    "loct": "привете"
+  },
+  "plural": {
+    "nomn": "приветы",
+    "gent": "приветов",
+    "datv": "приветам",
+    "accs": "приветы",
+    "ablt": "приветами",
+    "loct": "приветах"
+  }
+}
+```
+
+### Полное склонение слова (XML)
+
+Совместимый с `morpher.me` XML-формат с кириллическими тегами падежей.
+
+```bash
+curl "http://localhost:8000/api/v1/inflect?word=привет&format=xml"
+```
+
+```xml
+<xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <И>привет</И>
+  <Р>привета</Р>
+  <Д>привету</Д>
+  <В>привет</В>
+  <Т>приветом</Т>
+  <П>привете</П>
+  <множественное>
+    <И>приветы</И>
+    <Р>приветов</Р>
+    <Д>приветам</Д>
+    <В>приветы</В>
+    <Т>приветами</Т>
+    <П>приветах</П>
+  </множественное>
+</xml>
+```
+
+### Склонение в конкретный падеж (JSON)
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/inflect \
