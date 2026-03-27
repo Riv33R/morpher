@@ -3,9 +3,25 @@
 Полностью локальная альтернатива сервису morpher.me.
 """
 
+import json
+
 import pymorphy3
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+
+class UTF8JSONResponse(JSONResponse):
+    """JSONResponse с ensure_ascii=False — кириллица передаётся как есть, не экранируется."""
+
+    def render(self, content: object) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,   # <-- ключевое: не экранировать не-ASCII символы
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 # --- Инициализация анализатора ---
 morph = pymorphy3.MorphAnalyzer()
@@ -81,6 +97,7 @@ class AllFormsResponse(BaseModel):
 app = FastAPI(
     title="Morpher API",
     summary="Локальный сервис склонения русских слов по падежам.",
+    default_response_class=UTF8JSONResponse,  # UTF-8 JSON для всех эндпоинтов
     description=(
         "REST API для морфологического анализа и склонения слов русского языка. "
         "Использует библиотеку **PyMorphy3** и работает полностью локально, "
