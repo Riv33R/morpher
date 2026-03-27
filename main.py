@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 class UTF8JSONResponse(JSONResponse):
     """JSONResponse с ensure_ascii=False — кириллица передаётся как есть, не экранируется."""
 
+    # Явно объявляем charset=utf-8, иначе клиенты (PowerShell, curl и др.)
+    # могут интерпретировать тело как latin-1 по умолчанию для application/json
+    media_type = "application/json; charset=utf-8"
+
     def render(self, content: object) -> bytes:
         return json.dumps(
             content,
