@@ -148,8 +148,8 @@ def _compute_all_forms(word: str) -> AllFormsResponse:
     return AllFormsResponse(original=word.strip(), singular=singular, plural=plural)
 
 
-def _build_xml(data: AllFormsResponse) -> str:
-    """Строит XML-строку в формате, совместимом с morpher.me."""
+def _build_xml(data: AllFormsResponse) -> bytes:
+    """Строит XML в формате morpher.me и возвращает байты в UTF-8."""
     import xml.etree.ElementTree as ET
 
     root = ET.Element("xml")
@@ -172,7 +172,8 @@ def _build_xml(data: AllFormsResponse) -> str:
         if value is not None:
             ET.SubElement(plural_elem, _CASE_TO_XML_TAG[case]).text = value
 
-    return ET.tostring(root, encoding="unicode")
+    # Явно кодируем в UTF-8, чтобы клиенты корректно интерпретировали кириллицу
+    return ET.tostring(root, encoding="unicode").encode("utf-8")
 
 
 # --- Эндпоинты ---
@@ -226,7 +227,7 @@ async def inflect_all(
 
     if fmt == "xml":
         xml_body = _build_xml(data)
-        return Response(content=xml_body, media_type="application/xml")
+        return Response(content=xml_body, media_type="application/xml; charset=utf-8")
 
     return data
 
