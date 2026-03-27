@@ -127,7 +127,7 @@ app = FastAPI(
 
 # Соответствие тегов pymorphy3 → русскоязычным XML-тегам (как у morpher.me)
 _CASE_TO_XML_TAG: dict[str, str] = {
-    "nomn": "И",
+    # "nomn": "И",
     "gent": "Р",
     "datv": "Д",
     "accs": "В",
