@@ -200,7 +200,7 @@ def _build_xml(data: AllFormsResponse) -> bytes:
     root.set("xmlns:xsd", "http://www.w3.org/2001/XMLSchema")
 
     # Именительный ед.ч. — исходное слово (первый тег в выдаче morpher.me)
-    ET.SubElement(root, "И").text = data.original
+    # ET.SubElement(root, "И").text = data.original
 
     # Остальные падежи единственного числа
     for case in _SINGULAR_CASE_ORDER:
