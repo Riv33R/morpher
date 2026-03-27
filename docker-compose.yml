@@ -1,0 +1,17 @@
+services:
+  morpher-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: morpher-api
+    ports:
+      # Проброс порта: host:container
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      # Проверяем доступность сервиса через встроенный эндпоинт /health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
